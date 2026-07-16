@@ -124,48 +124,6 @@ function aggregateRates() {
 }
 
 // --------------------------------------------------------------------------
-// Selection highlight (canvas, world space — runs after renderHoveredCell)
-
-function renderSelection(g, settings) {
-	if (!state.selection.size) return;
-	const ctx = g.ctx;
-	ctx.save();
-	ctx.globalAlpha = 1;
-	ctx.lineWidth = g.unit * .02;
-	ctx.strokeStyle = settings.highlightColor.value;
-	ctx.fillStyle = settings.highlightFill.value;
-	for (const e of state.selection) {
-		if (!isAlive(g, e) || !g.isVisible(e)) continue;
-		const xy = g.uvToXY(e.position);
-		// footprint plus a small margin that hugs the building's base
-		const mult = (e.entitySpan ? e.entitySpan * 2 + 1 : 1) + .05;
-		const dx = .866 * g.unit * mult;
-		const dy = .5 * g.unit * mult;
-		ctx.beginPath();
-		ctx.moveTo(xy[0], xy[1] - dy);
-		ctx.lineTo(xy[0] + dx, xy[1]);
-		ctx.lineTo(xy[0], xy[1] + dy);
-		ctx.lineTo(xy[0] - dx, xy[1]);
-		ctx.closePath();
-		ctx.fill();
-		ctx.stroke();
-	}
-	// Tint the sprites themselves (same mechanism as the item-in-hand ghost).
-	// Iterate game draw order so overlapping selected buildings stack right;
-	// skipped on the dark plane where light-world sprites don't apply.
-	if (settings.tintSelected.value && !g.plane) {
-		const tint = settings.tintColor.value;
-		for (const e of g.stuff) {
-			if (!state.selection.has(e) || !isAlive(g, e) || !g.isVisible(e)) continue;
-			try {
-				e.renderColored(0, undefined, tint);
-			} catch (err) { /* varied sprite impls; never break the render loop */ }
-		}
-	}
-	ctx.restore();
-}
-
-// --------------------------------------------------------------------------
 // Stats panel (DOM)
 
 function fmt(g, v) {
@@ -318,31 +276,17 @@ module.exports = {
 			default: false,
 			sanitize: v => !!v
 		},
-		highlightColor: {
-			type: `string`,
-			name: `Highlight Outline Color`,
-			description: `RGBA hex color for the selection outline.`,
-			default: `#2266ffff`,
-			sanitize: MOD_TOOLBOX.sanitizers.colorHexRGBA
-		},
-		highlightFill: {
-			type: `string`,
-			name: `Highlight Fill Color`,
-			description: `RGBA hex color for the selection fill.`,
-			default: `#2266ff28`,
-			sanitize: MOD_TOOLBOX.sanitizers.colorHexRGBA
-		},
 		tintSelected: {
 			type: `boolean`,
 			name: `Tint Selected Buildings`,
-			description: `Also tint the building sprites themselves, like the item-in-hand ghost.`,
+			description: `Tint the sprites of selected buildings, like the item-in-hand ghost.`,
 			default: true,
 			sanitize: v => !!v
 		},
 		tintColor: {
 			type: `string`,
-			name: `Building Tint Color`,
-			description: `RGBA hex color for the sprite tint of selected buildings.`,
+			name: `Selection Tint Color`,
+			description: `RGBA hex color for the tint of selected buildings.`,
 			default: `#2266ff55`,
 			sanitize: MOD_TOOLBOX.sanitizers.colorHexRGBA
 		}
@@ -350,7 +294,37 @@ module.exports = {
 
 	getPatches(mctx) {
 		state.mctx = mctx;
-		return {
+
+		// Selected buildings are tinted from inside the entity render pass
+		// (right after each one draws itself), so buildings further down the
+		// grid still occlude the tint correctly — unlike a redraw after the
+		// whole pass. Same mechanism as the item-in-hand ghost.
+		const tintPatch = {
+			observe: {
+				render(ctx, result, dt, vposition) {
+					if (vposition || !mctx.settings.tintSelected.value) return;
+					if (!state.selection.has(ctx.self) || ctx.self.master.plane) return;
+					try {
+						ctx.self.renderColored(0, undefined, mctx.settings.tintColor.value);
+					} catch (err) { /* varied sprite impls; never break the render loop */ }
+				}
+			}
+		};
+
+		// Entity covers classes that inherit the base render; classes with
+		// their own render (collected from the codex) get their own hook.
+		const patches = { Entity: tintPatch };
+		const seen = new Set([`Entity`]);
+		for (const def of Object.values(abstract_getCodex().entities)) {
+			const cls = def.class;
+			if (!cls || seen.has(cls.name)) continue;
+			seen.add(cls.name);
+			if (Object.prototype.hasOwnProperty.call(cls.prototype, `render`)) {
+				patches[cls.name] = tintPatch;
+			}
+		}
+
+		return Object.assign(patches, {
 			Game: {
 				wrap: {
 					// Left mouse press: toggle selection instead of mining.
@@ -431,13 +405,10 @@ module.exports = {
 						if (!f && Array.isArray(r) && Array.isArray(path) && Array.isArray(path[0])) {
 							record(ctx.self.stuffMap[`u${path[0][0]}v${path[0][1]}`], PRODUCED, r);
 						}
-					},
-					renderHoveredCell(ctx) {
-						renderSelection(ctx.self, state.mctx.settings);
 					}
 				}
 			}
-		};
+		});
 	},
 
 	getStyles() {
