@@ -11,7 +11,8 @@ Multi-select buildings and watch the resources flowing in and out of the selecti
 - Press **R** (rebindable in mod settings) to toggle **select mode** — a badge appears at the bottom of the screen.
 - **Click** a building to toggle it, or **hold and drag** to paint-select a group. The building you press first decides what the drag does: starting on an unselected building selects everything you sweep over, starting on a selected one deselects. Resource cubes are ignored.
 - Press **R**, **Esc**, **Q**, or **E** to leave select mode. The stats panel stays open while anything is selected.
-- The panel (top right, left of the shop) shows production (green), consumption (red), and net per resource. Click the **/s** button to switch between per-second and per-minute.
+- The panel (top right, left of the shop) shows production (green), consumption (red), and net per resource. Click the **/min** button to switch between per-minute and per-second, and use **−**/**+** to adjust the averaging window (10s–10m).
+- Selected storage machines (containment vessel / containment silo) get an extra row showing total stored Chromalit against capacity and the fill/drain rate.
 
 Rates are measured live per building — fuel intake, production at emission, and chasm-network output (gradient well, general decay reactor) are all attributed to the building that caused them. Purchases, refunds, and internal transfers are excluded.
 
@@ -22,10 +23,8 @@ Available in the mod loader's settings screen:
 | Setting | Default | Description |
 | --- | --- | --- |
 | Select Mode Key | `r` | Single key that toggles select mode |
-| Averaging Window | `60` | Seconds of history the rates are averaged over (5–3600) |
-| Show Rates Per Minute | off | Start with /min instead of /s |
-| Tint Selected Buildings | on | Tint the sprites of selected buildings, like the item-in-hand ghost |
-| Selection Tint Color | `#2266ff55` | RGBA hex color for the tint (last two digits = opacity) |
+| Averaging Window | `60` | Starting window in seconds; adjustable in the panel at runtime |
+| Selection Tint Color | `#2266ff55` | RGBA hex color for the tint of selected buildings (last two digits = opacity) |
 
 ### Known limits
 

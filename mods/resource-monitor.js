@@ -24,10 +24,17 @@ const state = {
 	dragAction: true,          // what this drag paints: true = select, false = deselect
 	ledger: new Map(),         // Entity -> [{t, dir, r}], t in game-time ms
 	clock: 0,                  // accumulated game time (frozen while paused)
-	perMinute: false,
+	perMinute: true,
+	windowSec: 60,             // runtime-adjustable via the panel stepper
+	storage: {                 // sampled fill of selected storage machines
+		set: new Set(),        // vessels the samples belong to
+		samples: []            // [t, storedUnits]
+	},
 	mctx: null,
 	ui: {}
 };
+
+const WINDOW_STEPS = [10, 30, 60, 120, 300, 600];
 
 // --------------------------------------------------------------------------
 // Selection
@@ -86,7 +93,7 @@ function entityFromScreen(g, p) {
 }
 
 function windowMs() {
-	return state.mctx.settings.windowSeconds.value * 1000;
+	return state.windowSec * 1000;
 }
 
 function pruneLedger(g) {
@@ -121,6 +128,49 @@ function aggregateRates() {
 		rates[i][CONSUMED] *= perSecond;
 	}
 	return rates;
+}
+
+// --------------------------------------------------------------------------
+// Storage machines (containment vessel / containment silo): their stored
+// Chromalit (fill * capacity) is state, not an event, so it is sampled on
+// the panel tick and the rate is the change over the window.
+
+function isStorage(e) {
+	return e.name === `vessel` || e.name === `vessel2`;
+}
+
+function sampleStorage() {
+	const vessels = [];
+	for (const e of state.selection) {
+		if (isStorage(e)) vessels.push(e);
+	}
+	const s = state.storage;
+	// the series only makes sense for a fixed set of vessels
+	if (vessels.length !== s.set.size || vessels.some(v => !s.set.has(v))) {
+		s.set = new Set(vessels);
+		s.samples = [];
+	}
+	if (!vessels.length) return null;
+
+	let stored = 0;
+	let capacity = 0;
+	for (const v of vessels) {
+		stored += v.fill * v.capacity;
+		capacity += v.capacity;
+	}
+	s.samples.push([state.clock, stored]);
+	const cutoff = state.clock - windowMs();
+	while (s.samples.length > 2 && s.samples[0][0] < cutoff) s.samples.shift();
+
+	const first = s.samples[0];
+	const last = s.samples[s.samples.length - 1];
+	const span = last[0] - first[0];
+	return {
+		count: vessels.length,
+		stored: stored,
+		capacity: capacity,
+		ratePerSec: span > 0 ? (last[1] - first[1]) / span * 1000 : 0
+	};
 }
 
 // --------------------------------------------------------------------------
@@ -187,6 +237,30 @@ function refreshPanel() {
 
 		rows.append(chip, name, cOut, cIn, cNet);
 	}
+
+	const st = sampleStorage();
+	if (st) {
+		any = true;
+		const chip = document.createElement(`span`);
+		chip.className = `rm-chip`;
+		chip.style.backgroundColor = game.codex.resources[5].triplet[1];
+
+		const name = document.createElement(`span`);
+		name.className = `rm-name`;
+		name.textContent = `${game.pronounce(`resources`, 5)} stored (${st.count})`;
+
+		const cur = document.createElement(`span`);
+		cur.className = `rm-store`;
+		cur.textContent = `${fmt(game, st.stored)} / ${fmt(game, st.capacity)}`;
+
+		const rate = st.ratePerSec * mul;
+		const cRate = document.createElement(`span`);
+		cRate.className = `rm-net ${rate > 0 ? `rm-pos` : rate < 0 ? `rm-neg` : ``}`;
+		cRate.textContent = `${rate >= 0 ? `+` : `–`} ${fmt(game, Math.abs(rate))} ${suffix}`;
+
+		rows.append(chip, name, cur, cRate);
+	}
+
 	if (!any) {
 		const empty = document.createElement(`span`);
 		empty.className = `rm-empty`;
@@ -207,21 +281,38 @@ function buildUI(selectKey) {
 
 	const unit = document.createElement(`button`);
 	unit.id = `rm-unit`;
+	unit.className = `rm-btn`;
 	unit.title = `Toggle per-second / per-minute`;
 	unit.addEventListener(`click`, () => {
 		state.perMinute = !state.perMinute;
 		refreshPanel();
 	});
 
+	// averaging window stepper
+	const winDown = document.createElement(`button`);
+	winDown.className = `rm-btn`;
+	winDown.textContent = `−`;
+	winDown.title = `Shorter averaging window`;
+	const winVal = document.createElement(`span`);
+	winVal.id = `rm-window`;
+	winVal.title = `Averaging window`;
+	const winUp = document.createElement(`button`);
+	winUp.className = `rm-btn`;
+	winUp.textContent = `+`;
+	winUp.title = `Longer averaging window`;
+	winDown.addEventListener(`click`, () => stepWindow(-1));
+	winUp.addEventListener(`click`, () => stepWindow(1));
+
 	const clear = document.createElement(`button`);
 	clear.id = `rm-clear`;
+	clear.className = `rm-btn`;
 	clear.textContent = `Clear`;
 	clear.addEventListener(`click`, () => {
 		state.selection.clear();
 		refreshPanel();
 	});
 
-	header.append(count, unit, clear);
+	header.append(count, winDown, winVal, winUp, unit, clear);
 
 	const rows = document.createElement(`div`);
 	rows.id = `rm-rows`;
@@ -232,11 +323,33 @@ function buildUI(selectKey) {
 	badge.id = `rm-badge`;
 	badge.textContent = `SELECT MODE — click or drag over buildings · ${selectKey.toUpperCase()} or ESC to exit`;
 
-	state.ui = { panel, rows, count, unit, badge };
+	state.ui = { panel, rows, count, unit, badge, winVal };
+	updateWindowLabel();
 
 	const attach = () => document.body.append(panel, badge);
 	if (document.body) attach();
 	else window.addEventListener(`DOMContentLoaded`, attach);
+}
+
+function windowLabel() {
+	const v = state.windowSec;
+	return v >= 60 && v % 60 === 0 ? `${v / 60}m` : `${v}s`;
+}
+
+function updateWindowLabel() {
+	if (state.ui.winVal) state.ui.winVal.textContent = windowLabel();
+}
+
+function stepWindow(dir) {
+	const cur = state.windowSec;
+	if (dir > 0) {
+		state.windowSec = WINDOW_STEPS.find(s => s > cur) ?? WINDOW_STEPS[WINDOW_STEPS.length - 1];
+	} else {
+		const lower = WINDOW_STEPS.filter(s => s < cur);
+		state.windowSec = lower.length ? lower[lower.length - 1] : WINDOW_STEPS[0];
+	}
+	updateWindowLabel();
+	refreshPanel();
 }
 
 // --------------------------------------------------------------------------
@@ -269,20 +382,6 @@ module.exports = {
 			default: 60,
 			sanitize: (v, d) => (typeof v === `number` && isFinite(v) ? Math.max(5, Math.min(3600, v)) : d)
 		},
-		perMinute: {
-			type: `boolean`,
-			name: `Show Rates Per Minute`,
-			description: `Start with rates displayed per minute instead of per second.`,
-			default: false,
-			sanitize: v => !!v
-		},
-		tintSelected: {
-			type: `boolean`,
-			name: `Tint Selected Buildings`,
-			description: `Tint the sprites of selected buildings, like the item-in-hand ghost.`,
-			default: true,
-			sanitize: v => !!v
-		},
 		tintColor: {
 			type: `string`,
 			name: `Selection Tint Color`,
@@ -302,8 +401,7 @@ module.exports = {
 		const tintPatch = {
 			observe: {
 				render(ctx, result, dt, vposition) {
-					if (vposition || !mctx.settings.tintSelected.value) return;
-					if (!state.selection.has(ctx.self) || ctx.self.master.plane) return;
+					if (vposition || !state.selection.has(ctx.self) || ctx.self.master.plane) return;
 					try {
 						ctx.self.renderColored(0, undefined, mctx.settings.tintColor.value);
 					} catch (err) { /* varied sprite impls; never break the render loop */ }
@@ -450,7 +548,7 @@ module.exports = {
 	font-weight: 600;
 }
 
-#rm-unit, #rm-clear {
+.rm-btn {
 	padding: .2rem .6rem;
 	background: #1121;
 	color: #112;
@@ -461,8 +559,23 @@ module.exports = {
 	cursor: pointer;
 }
 
-#rm-unit:hover, #rm-clear:hover {
+.rm-btn:hover {
 	background: #1122;
+}
+
+#rm-window {
+	min-width: 2.2rem;
+	text-align: center;
+	font-size: .8rem;
+	color: #1129;
+	font-variant-numeric: tabular-nums;
+}
+
+.rm-store {
+	grid-column: 3 / 5;
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+	color: #112b;
 }
 
 #rm-rows {
@@ -536,7 +649,7 @@ body.rm-select-mode #rm-badge {
 
 	onLoad(mctx) {
 		state.mctx = mctx;
-		state.perMinute = mctx.settings.perMinute.value;
+		state.windowSec = mctx.settings.windowSeconds.value;
 		const selectKey = mctx.settings.selectKey.value;
 
 		buildUI(selectKey);
