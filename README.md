@@ -25,6 +25,8 @@ Available in the mod loader's settings screen:
 | Averaging Window | `60` | Seconds of history the rates are averaged over (5–3600) |
 | Show Rates Per Minute | off | Start with /min instead of /s |
 | Highlight Outline / Fill Color | blue | RGBA hex colors for the selection boxes |
+| Tint Selected Buildings | on | Also tint the building sprites themselves, like the item-in-hand ghost |
+| Building Tint Color | `#2266ff55` | RGBA hex color for the sprite tint (last two digits = opacity) |
 
 ### Known limits
 

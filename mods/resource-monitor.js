@@ -3,26 +3,12 @@
 // ============================================================================
 // Resource Monitor — a Sixty Four mod
 //
-// Adds a Q/E-style "select mode" (default key: R): click or drag over
-// buildings to toggle them in a selection, and a panel shows the resources
-// flowing in (fuel consumed) and out (production) of the selected group,
-// averaged over a rolling window.
+// Multi-select buildings (press R, then click or drag) and watch the
+// resources flowing in and out of the selection, averaged over a rolling
+// window.
 //
-// How it measures: consumption is attributed by observing
-// Game.requestResources/askForResources (their destination argument is the
-// building's grid position); production by observing
-// Game.createResourceTransfer at emission time (its source argument is the
-// building's screen position, inverted back to a grid cell). Transfers with
-// a custom completion callback or the "skip" flag are ignored — those are
-// internal moves (cube -> consumer), purchases and refunds.
-//
-// Chasm-network production (gradient well, general decay reactor) is counted
-// via createChasmTransfer, whose path starts at the emitting entity's cell.
-//
-// Known limits: resource cubes are not selectable (transient), so income
-// from manually breaking cubes is not measurable; rare event payouts
-// (hollow events) originate from HUD coordinates and may occasionally land
-// on a building.
+// Full description, settings and known limits:
+// https://github.com/michielbrinkers/sixty_four_mods
 // ============================================================================
 
 const RES_COUNT = 10;
@@ -163,6 +149,18 @@ function renderSelection(g, settings) {
 		ctx.closePath();
 		ctx.fill();
 		ctx.stroke();
+	}
+	// Tint the sprites themselves (same mechanism as the item-in-hand ghost).
+	// Iterate game draw order so overlapping selected buildings stack right;
+	// skipped on the dark plane where light-world sprites don't apply.
+	if (settings.tintSelected.value && !g.plane) {
+		const tint = settings.tintColor.value;
+		for (const e of g.stuff) {
+			if (!state.selection.has(e) || !isAlive(g, e) || !g.isVisible(e)) continue;
+			try {
+				e.renderColored(0, undefined, tint);
+			} catch (err) { /* varied sprite impls; never break the render loop */ }
+		}
 	}
 	ctx.restore();
 }
@@ -332,6 +330,20 @@ module.exports = {
 			name: `Highlight Fill Color`,
 			description: `RGBA hex color for the selection fill.`,
 			default: `#2266ff28`,
+			sanitize: MOD_TOOLBOX.sanitizers.colorHexRGBA
+		},
+		tintSelected: {
+			type: `boolean`,
+			name: `Tint Selected Buildings`,
+			description: `Also tint the building sprites themselves, like the item-in-hand ghost.`,
+			default: true,
+			sanitize: v => !!v
+		},
+		tintColor: {
+			type: `string`,
+			name: `Building Tint Color`,
+			description: `RGBA hex color for the sprite tint of selected buildings.`,
+			default: `#2266ff55`,
 			sanitize: MOD_TOOLBOX.sanitizers.colorHexRGBA
 		}
 	},
