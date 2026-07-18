@@ -6,6 +6,8 @@ Mods for [Sixty Four](https://store.steampowered.com/app/2659900/Sixty_Four/), b
 
 Multi-select buildings and watch the resources flowing in and out of the selection, averaged over a rolling window — see at a glance whether a build layout is actually profitable.
 
+![Selected buildings tinted blue with the live rate panel in the top right](resource-monitor-in-game.png)
+
 ### Usage
 
 - Press **R** (rebindable in mod settings) to toggle **select mode** — a badge appears at the bottom of the screen.
